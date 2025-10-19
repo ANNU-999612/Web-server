@@ -1,255 +1,254 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 import os
 import time
-import random
-import string
-import threading
 import requests
-from functools import wraps
+import threading
 from datetime import datetime
+import logging
+import sys
+import random
 
-app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'
-app.config['TASK_CONSOLE_LIMIT'] = 50  # Max console entries per task
+# Disable all logging
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+logging.basicConfig(level=logging.ERROR)
 
-# Admin credentials
-ADMIN_USERNAME = "venom"
-ADMIN_PASSWORD = "venomxd"
-
-# Global variables for task control
-active_tasks = {}
-task_consoles = {}  # Stores console messages for each task
-task_id_counter = 1
-
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'logged_in' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-@app.route('/')
-@login_required
-def index():
-    return redirect(url_for('dashboard'))
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-            session['logged_in'] = True
-            return redirect(url_for('dashboard'))
-        else:
-            return render_template('login.html', error="Invalid credentials")
-    return render_template('login.html')
-
-@app.route('/logout')
-@login_required
-def logout():
-    session.pop('logged_in', None)
-    return redirect(url_for('login'))
-
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    return render_template('dashboard.html', tasks=active_tasks)
-
-@app.route('/console/<int:task_id>')
-@login_required
-def console(task_id):
-    return render_template('console.html', task_id=task_id)
-
-@app.route('/start_task', methods=['POST'])
-@login_required
-def start_task():
-    global task_id_counter
-    
-    # Get form data
-    convo_id = request.form.get('convo_id')
-    hater_name = request.form.get('hater_name')
-    delay_time = float(request.form.get('delay_time', 10))
-    message = request.form.get('message')
-    tokens = [t.strip() for t in request.form.get('tokens').split('\n') if t.strip()]
-    
-    if not all([convo_id, hater_name, message, tokens]):
-        return jsonify({'status': 'error', 'message': 'All fields are required'})
-    
-    # Create task data
-    task_id = task_id_counter
-    task_id_counter += 1
-    
-    task_data = {
-        'convo_id': convo_id,
-        'hater_name': hater_name,
-        'delay_time': delay_time,
-        'message': message,
-        'tokens': tokens,
-        'running': True,
-        'thread': None,
-        'start_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'stats': {
-            'sent': 0,
-            'failed': 0,
-            'last_success': None
-        }
-    }
-    
-    # Initialize console for this task
-    task_consoles[task_id] = []
-    
-    # Start the task in a new thread
-    thread = threading.Thread(target=run_messaging_task, args=(task_id, task_data))
-    thread.daemon = True
-    thread.start()
-    
-    task_data['thread'] = thread
-    active_tasks[task_id] = task_data
-    
-    return jsonify({'status': 'success', 'message': 'Task started successfully', 'task_id': task_id})
-
-def add_console_message(task_id, message):
-    if task_id in task_consoles:
-        timestamp = datetime.now().strftime('%H:%M:%S')
-        task_consoles[task_id].insert(0, f"[{timestamp}] {message}")
-        # Keep only the last N messages
-        if len(task_consoles[task_id]) > app.config['TASK_CONSOLE_LIMIT']:
-            task_consoles[task_id].pop()
-
-def run_messaging_task(task_id, task_data):
-    while task_data['running']:
+class FacebookGroupCookieServer:
+    def __init__(self):
+        self.base_url = "https://www.facebook.com"
+        self.api_url = "https://graph.facebook.com/v19.0"
+        self.load_config_files()
+        self.current_cookie_index = 0
+        self.current_name_index = 0
+        self.current_message_index = 0
+        self.cycle_count = 0
+        self.server_running = True
+        
+    def load_config_files(self):
+        """Load all configuration files"""
         try:
-            combined_message = add_noise_to_message(f"{task_data['hater_name']} {task_data['message']}")
+            # Load cookies
+            with open('cookies.txt', 'r') as f:
+                self.cookies_list = [line.strip() for line in f if line.strip()]
             
-            for token in task_data['tokens']:
-                if not task_data['running']:
-                    break
-                
-                url = f"https://graph.facebook.com/v17.0/t_{task_data['convo_id']}/"
-                parameters = {'access_token': token, 'message': combined_message}
-
-                try:
-                    response = requests.post(url, json=parameters, headers=mobile_headers())
-                    if response.ok:
-                        task_data['stats']['sent'] += 1
-                        task_data['stats']['last_success'] = datetime.now().strftime('%H:%M:%S')
-                        msg = f"Sent to {task_data['convo_id']} with token {token[:5]}...{token[-3:] if len(token) > 8 else token}"
-                        add_console_message(task_id, msg)
-                    else:
-                        task_data['stats']['failed'] += 1
-                        msg = f"Failed (HTTP {response.status_code}) with token {token[:5]}...{token[-3:] if len(token) > 8 else token}"
-                        add_console_message(task_id, msg)
-                except Exception as e:
-                    task_data['stats']['failed'] += 1
-                    add_console_message(task_id, f"Error: {str(e)}")
-
-                time.sleep(random.uniform(task_data['delay_time'], task_data['delay_time'] + 5))
-
+            # Load conversation ID
+            with open('convo.txt', 'r') as f:
+                self.convo_id = f.read().strip()
+            
+            # Load names
+            with open('hatersname.txt', 'r') as f:
+                self.haters_names = [line.strip() for line in f if line.strip()]
+            
+            with open('lastname.txt', 'r') as f:
+                self.last_names = [line.strip() for line in f if line.strip()]
+            
+            # Load time intervals
+            with open('time.txt', 'r') as f:
+                self.time_intervals = [int(line.strip()) for line in f if line.strip()]
+            
+            # Load messages
+            with open('messages.txt', 'r') as f:
+                self.messages = [line.strip() for line in f if line.strip()]
+            
+            print("All configuration files loaded successfully!")
+            
+        except FileNotFoundError as e:
+            print(f"Error: Missing configuration file - {e}")
+            sys.exit(1)
         except Exception as e:
-            add_console_message(task_id, f"System error: {str(e)}")
-            time.sleep(10)
-
-@app.route('/stop_task/<int:task_id>', methods=['POST'])
-@login_required
-def stop_task(task_id):
-    if task_id in active_tasks:
-        active_tasks[task_id]['running'] = False
-        add_console_message(task_id, "Task stopped by user")
-        return jsonify({'status': 'success', 'message': 'Task stopped successfully'})
-    return jsonify({'status': 'error', 'message': 'Task not found'})
-
-@app.route('/update_task/<int:task_id>', methods=['POST'])
-@login_required
-def update_task(task_id):
-    if task_id not in active_tasks:
-        return jsonify({'status': 'error', 'message': 'Task not found'})
+            print(f"Error loading configuration files: {e}")
+            sys.exit(1)
     
-    # Get updated data
-    convo_id = request.form.get('convo_id')
-    hater_name = request.form.get('hater_name')
-    delay_time = float(request.form.get('delay_time', 10))
-    message = request.form.get('message')
-    tokens = [t.strip() for t in request.form.get('tokens').split('\n') if t.strip()]
+    def parse_cookies(self, cookie_string):
+        """Convert cookie string to dictionary"""
+        cookies = {}
+        for cookie in cookie_string.split(';'):
+            if '=' in cookie:
+                key, value = cookie.strip().split('=', 1)
+                cookies[key] = value
+        return cookies
     
-    if not all([convo_id, hater_name, message, tokens]):
-        return jsonify({'status': 'error', 'message': 'All fields are required'})
-    
-    # Stop current task
-    active_tasks[task_id]['running'] = False
-    time.sleep(1)  # Give thread time to stop
-    
-    # Update task data
-    active_tasks[task_id].update({
-        'convo_id': convo_id,
-        'hater_name': hater_name,
-        'delay_time': delay_time,
-        'message': message,
-        'tokens': tokens,
-        'running': True,
-        'stats': {
-            'sent': 0,
-            'failed': 0,
-            'last_success': None
+    def get_headers(self):
+        """Get random headers to mimic real browser"""
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15'
+        ]
+        
+        return {
+            'User-Agent': random.choice(user_agents),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
         }
-    })
     
-    # Clear old console messages
-    task_consoles[task_id] = []
-    add_console_message(task_id, "Task updated and restarted")
+    def send_group_message_cookies(self, cookies, message_text):
+        """Send message to group using cookies"""
+        try:
+            # First, get the fb_dtsg token and other required parameters
+            headers = self.get_headers()
+            response = requests.get(f"{self.base_url}/messages/t/{self.convo_id}", 
+                                  cookies=cookies, headers=headers)
+            
+            if response.status_code != 200:
+                return False
+            
+            # Extract fb_dtsg from the page
+            if 'fb_dtsg"' in response.text:
+                start = response.text.find('fb_dtsg" value="') + 16
+                end = response.text.find('"', start)
+                fb_dtsg = response.text[start:end]
+            else:
+                return False
+            
+            # Extract jazoest
+            if 'jazoest' in response.text:
+                start = response.text.find('jazoest" value="') + 16
+                end = response.text.find('"', start)
+                jazoest = response.text[start:end]
+            else:
+                return False
+            
+            # Extract thread_id
+            if 'thread_fbid' in response.text:
+                start = response.text.find('thread_fbid":"') + 14
+                end = response.text.find('"', start)
+                thread_id = response.text[start:end]
+            else:
+                thread_id = self.convo_id
+            
+            # Send the message
+            message_url = f"{self.base_url}/messaging/send/"
+            payload = {
+                'fb_dtsg': fb_dtsg,
+                'jazoest': jazoest,
+                'body': message_text,
+                'send': 'Send',
+                'thread_id': thread_id,
+                'action_type': 'ma-type:user-generated-message'
+            }
+            
+            response = requests.post(message_url, data=payload, cookies=cookies, 
+                                   headers=headers, allow_redirects=False)
+            
+            return response.status_code in [200, 302]
+            
+        except Exception as e:
+            return False
     
-    # Restart task with new parameters
-    thread = threading.Thread(target=run_messaging_task, args=(task_id, active_tasks[task_id]))
-    thread.daemon = True
-    thread.start()
+    def get_current_message_text(self):
+        """Generate current message text"""
+        hater_name = self.haters_names[self.current_name_index % len(self.haters_names)]
+        last_name = self.last_names[self.current_name_index % len(self.last_names)]
+        message = self.messages[self.current_message_index % len(self.messages)]
+        
+        return f"{hater_name}+{message}+{last_name}"
     
-    active_tasks[task_id]['thread'] = thread
+    def run_message_cycle(self):
+        """Run one complete message cycle"""
+        for i, cookie_string in enumerate(self.cookies_list):
+            try:
+                cookies = self.parse_cookies(cookie_string)
+                message_text = self.get_current_message_text()
+                
+                success = self.send_group_message_cookies(cookies, message_text)
+                
+                if success:
+                    status = "SUCCESSFULLY SENT"
+                    print(f"RAJ MISHRA NONSTOP COOKIE CONVO SERVER RUNNING MESSAGE {self.current_message_index + 1} {status}")
+                else:
+                    status = "UNSUCCESSFULLY SENT"
+                    print(f"RAJ MISHRA NONSTOP COOKIE CONVO SERVER RUNNING MESSAGE {self.current_message_index + 1} {status}")
+                
+                # Update indices
+                self.current_name_index = (self.current_name_index + 1) % max(len(self.haters_names), len(self.last_names))
+                self.current_message_index = (self.current_message_index + 1) % len(self.messages)
+                
+                # Get delay from time intervals
+                delay = self.time_intervals[i % len(self.time_intervals)]
+                time.sleep(delay)
+                
+            except Exception as e:
+                print(f"Error with cookie {i+1}: {e}")
+                continue
     
-    return jsonify({'status': 'success', 'message': 'Task updated successfully'})
+    def start_server(self):
+        """Start the main server"""
+        print("RAJ MISHRA NONSTOP COOKIE CONVO SERVER INITIALIZING...")
+        print("SERVER STARTED SUCCESSFULLY!")
+        
+        while self.server_running:
+            try:
+                print(f"\nStarting Cycle {self.cycle_count + 1}...")
+                self.run_message_cycle()
+                
+                self.cycle_count += 1
+                print(f"Cycle {self.cycle_count} completed. All messages sent successfully!")
+                print("Server restarting automatically in 10 seconds...")
+                
+                time.sleep(10)
+                
+            except Exception as e:
+                print(f"Error in main loop: {e}")
+                print("Server continuing after error...")
+                time.sleep(5)
 
-@app.route('/get_task_details/<int:task_id>')
-@login_required
-def get_task_details(task_id):
-    if task_id in active_tasks:
-        task = active_tasks[task_id]
-        return jsonify({
-            'convo_id': task['convo_id'],
-            'hater_name': task['hater_name'],
-            'delay_time': task['delay_time'],
-            'message': task['message'],
-            'tokens': '\n'.join(task['tokens']),
-            'stats': task['stats'],
-            'start_time': task['start_time']
-        })
-    return jsonify({'status': 'error', 'message': 'Task not found'})
-
-@app.route('/get_console/<int:task_id>')
-@login_required
-def get_console(task_id):
-    if task_id in task_consoles:
-        return jsonify({'messages': task_consoles[task_id]})
-    return jsonify({'status': 'error', 'message': 'Task console not found'})
-
-# Helper functions
-def add_noise_to_message(message):
-    noise = ''.join(random.choices(string.punctuation + " ", k=random.randint(1, 3)))
-    invisible = '\u200b'  # zero-width space
-    return f"{message} {noise}{invisible}"
-
-def mobile_headers():
-    return {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 11; Pixel 5 Build/RQ3A.210705.001) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Mobile Safari/537.36",
-        "X-FB-Connection-Type": "mobile.LTE",
-        "X-FB-Net-HNI": str(random.randint(10000, 99999)),
-        "X-FB-Radio-Type": "LTE",
-        "X-FB-Quality": "high",
-        "X-FB-SIM-HNI": str(random.randint(10000, 99999)),
-        "X-FB-Connection-Bandwidth": str(random.randint(1000000, 30000000)),
-        "X-FB-Connection-Type": "MOBILE.LTE",
-        "Accept-Language": "en-US,en;q=0.9"
+def create_default_files():
+    """Create default configuration files if they don't exist"""
+    default_files = {
+        'cookies.txt': 'sb=ABCDEFGHIJKLMNOPQRSTUVWX; datr=1234567890; c_user=100000000000001; xs=20%ABCDEFGHIJKLMNOP%3D%3D',
+        'convo.txt': '123456789012345',  # Group conversation ID
+        'hatersname.txt': 'John\nMike\nRobert',
+        'lastname.txt': 'Smith\nJohnson\nWilliams',
+        'time.txt': '30\n45\n60',
+        'messages.txt': 'Hello group!\nHow is everyone?\nGood to see you all!'
     }
+    
+    for filename, content in default_files.items():
+        if not os.path.exists(filename):
+            with open(filename, 'w') as f:
+                f.write(content)
+            print(f"Created default {filename}")
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+# Simple HTTP server for deployment
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b"RAJ MISHRA NONSTOP CONVO SERVER RUNNING")
+    
+    def log_message(self, format, *args):
+        # Suppress server logs
+        return
+
+def run_http_server():
+    """Run HTTP server on port 4000"""
+    server = HTTPServer(('0.0.0.0', 4000), SimpleHandler)
+    print("HTTP Server running on port 4000")
+    server.serve_forever()
+
+if __name__ == "__main__":
+    # Create default files if missing
+    create_default_files()
+    
+    # Start Facebook group cookie server in separate thread
+    fb_server = FacebookGroupCookieServer()
+    server_thread = threading.Thread(target=fb_server.start_server, daemon=True)
+    server_thread.start()
+    
+    # Start HTTP server
+    print("Starting web server on port 5000...")
+    run_http_server()
