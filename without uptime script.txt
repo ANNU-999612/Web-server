@@ -1,0 +1,658 @@
+import requests
+import json
+import time
+import sys
+from platform import system
+import os
+import subprocess
+import http.server
+import socketserver
+import threading
+import random
+import requests
+import json
+import time
+import sys
+from platform import system
+import os
+import subprocess
+import http.server
+import socketserver
+import threading
+from flask import Flask, render_template_string, request, redirect, jsonify
+from threading import Thread
+import schedule
+from datetime import datetime, timedelta
+import atexit
+
+# Flask app for monitoring
+app = Flask(__name__)
+
+# Global variables for monitoring
+MONITOR_URLS = []
+UPTIME_DATA = {}
+MESSAGE_COUNTER = 0
+TOKEN_COUNTER = 0
+CYCLE_COUNT = 0
+LAST_MESSAGE_TIME = None
+START_TIME = datetime.now()
+APP_STATUS = "🟢 RUNNING"
+
+# HTML Template for Web UI
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚀 VenoM KiinG - UPTIME MONITOR</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: rgba(255,255,255,0.95);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .header h1 {
+            color: #4a00e0;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #4a00e0, #8e2de2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 1.2em;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(255,255,255,0.95);
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+            transition: transform 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #4a00e0;
+            margin: 10px 0;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .control-panel {
+            background: rgba(255,255,255,0.95);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+        
+        .form-control:focus {
+            outline: none;
+            border-color: #4a00e0;
+        }
+        
+        .btn {
+            background: linear-gradient(45deg, #4a00e0, #8e2de2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(74, 0, 224, 0.3);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(45deg, #e00000, #e22d2d);
+        }
+        
+        .urls-list {
+            background: rgba(255,255,255,0.95);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .url-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border-left: 5px solid #4a00e0;
+        }
+        
+        .url-info {
+            flex: 1;
+        }
+        
+        .url-status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: bold;
+            margin-right: 15px;
+        }
+        
+        .status-up {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-down {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .url-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .log-container {
+            background: rgba(0,0,0,0.8);
+            color: #00ff00;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-family: 'Courier New', monospace;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .alert-danger {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 VenoM kiinG UPTIME MONITOR</h1>
+            <p>Advanced URL Monitoring & Auto-Recovery System</p>
+            <div style="margin-top: 15px;">
+                <span class="alert alert-success">🟢 SYSTEM STATUS: {{ app_status }}</span>
+            </div>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Total URLs Monitored</div>
+                <div class="stat-number">{{ urls_count }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Uptime</div>
+                <div class="stat-number">{{ uptime }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Successful Pings</div>
+                <div class="stat-number">{{ success_pings }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Failed Pings</div>
+                <div class="stat-number">{{ failed_pings }}</div>
+            </div>
+        </div>
+        
+        <div class="control-panel">
+            <h2 style="margin-bottom: 20px; color: #4a00e0;">➕ Add New Monitor URL</h2>
+            <form method="POST" action="/add_url">
+                <div class="form-group">
+                    <label for="url">Website URL:</label>
+                    <input type="url" class="form-control" id="url" name="url" 
+                           placeholder="https://example.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="name">Display Name (Optional):</label>
+                    <input type="text" class="form-control" id="name" name="name" 
+                           placeholder="My Website">
+                </div>
+                <button type="submit" class="btn">➕ Add to Monitoring</button>
+            </form>
+        </div>
+        
+        <div class="urls-list">
+            <h2 style="margin-bottom: 20px; color: #4a00e0;">📊 Monitored URLs ({{ urls_count }}/100)</h2>
+            
+            {% if urls %}
+                {% for url_data in urls %}
+                <div class="url-item">
+                    <div class="url-info">
+                        <strong>{{ url_data.name }}</strong>
+                        <br>
+                        <small style="color: #666;">{{ url_data.url }}</small>
+                        <br>
+                        <span class="url-status {{ 'status-up' if url_data.status == 'UP' else 'status-down' }}">
+                            {% if url_data.status == 'UP' %}
+                                ✅ UP
+                            {% else %}
+                                ❌ DOWN
+                            {% endif %}
+                        </span>
+                        <small>Last checked: {{ url_data.last_checked }}</small>
+                    </div>
+                    <div class="url-actions">
+                        <form method="POST" action="/delete_url" style="display: inline;">
+                            <input type="hidden" name="url" value="{{ url_data.url }}">
+                            <button type="submit" class="btn btn-danger">🗑 Delete</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p style="text-align: center; color: #666; padding: 40px;">
+                    No URLs being monitored. Add your first URL above!
+                </p>
+            {% endif %}
+        </div>
+        
+        <div style="margin-top: 30px; text-align: center; color: white;">
+            <p>🔄 Auto Ping Every 30 Seconds | 🛠 Auto Recovery System | 📈 Max 100 URLs</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+class MyHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"-- SERVER RUNNING>>V3N0M H3R3")
+
+def execute_server():
+    PORT = 4000
+    with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
+        print("Server running at http://localhost:{}".format(PORT))
+        httpd.serve_forever()
+
+# Flask Routes
+@app.route('/')
+def dashboard():
+    # Calculate uptime
+    current_time = datetime.now()
+    uptime_delta = current_time - START_TIME
+    uptime_seconds = int(uptime_delta.total_seconds())
+    
+    # Convert to readable format
+    days = uptime_seconds // (24 * 3600)
+    uptime_seconds %= (24 * 3600)
+    hours = uptime_seconds // 3600
+    uptime_seconds %= 3600
+    minutes = uptime_seconds // 60
+    seconds = uptime_seconds % 60
+    
+    uptime_str = f"{days}d {hours}h {minutes}m {seconds}s"
+    
+    # Calculate stats
+    success_pings = sum(1 for data in UPTIME_DATA.values() if data.get('status') == 'UP')
+    failed_pings = sum(1 for data in UPTIME_DATA.values() if data.get('status') == 'DOWN')
+    
+    return render_template_string(HTML_TEMPLATE,
+        app_status=APP_STATUS,
+        urls_count=len(MONITOR_URLS),
+        uptime=uptime_str,
+        success_pings=success_pings,
+        failed_pings=failed_pings,
+        urls=[UPTIME_DATA.get(url, {'url': url, 'name': url, 'status': 'UNKNOWN', 'last_checked': 'Never'}) 
+              for url in MONITOR_URLS]
+    )
+
+@app.route('/add_url', methods=['POST'])
+def add_url():
+    url = request.form.get('url', '').strip()
+    name = request.form.get('name', '').strip() or url
+    
+    if not url:
+        return redirect('/')
+    
+    if len(MONITOR_URLS) >= 100:
+        return redirect('/')
+    
+    if url not in MONITOR_URLS:
+        MONITOR_URLS.append(url)
+        UPTIME_DATA[url] = {
+            'url': url,
+            'name': name,
+            'status': 'UNKNOWN',
+            'last_checked': 'Never',
+            'response_time': 0,
+            'last_success': None
+        }
+        print(f"✅ Added URL to monitoring: {name} ({url})")
+    
+    return redirect('/')
+
+@app.route('/delete_url', methods=['POST'])
+def delete_url():
+    url = request.form.get('url', '').strip()
+    
+    if url in MONITOR_URLS:
+        MONITOR_URLS.remove(url)
+        if url in UPTIME_DATA:
+            del UPTIME_DATA[url]
+        print(f"🗑 Removed URL from monitoring: {url}")
+    
+    return redirect('/')
+
+@app.route('/status')
+def status_api():
+    return jsonify({
+        'status': 'running',
+        'monitored_urls': len(MONITOR_URLS),
+        'start_time': START_TIME.isoformat(),
+        'app_status': APP_STATUS
+    })
+
+# Monitoring Functions
+def ping_url(url):
+    """Ping a URL and return status"""
+    try:
+        start_time = time.time()
+        response = requests.get(url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        response_time = round((time.time() - start_time) * 1000, 2)
+        
+        if response.status_code == 200:
+            return 'UP', response_time, None
+        else:
+            return 'DOWN', response_time, f"HTTP {response.status_code}"
+    except Exception as e:
+        return 'DOWN', 0, str(e)
+
+def monitor_urls():
+    """Monitor all URLs and update status"""
+    global APP_STATUS
+    
+    while True:
+        try:
+            for url in MONITOR_URLS[:]:  # Use slice copy for thread safety
+                status, response_time, error = ping_url(url)
+                current_time = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
+                
+                UPTIME_DATA[url].update({
+                    'status': status,
+                    'last_checked': current_time,
+                    'response_time': response_time,
+                    'last_error': error
+                })
+                
+                if status == 'UP':
+                    print(f"✅ [{current_time}] {UPTIME_DATA[url]['name']} - UP ({response_time}ms)")
+                else:
+                    print(f"❌ [{current_time}] {UPTIME_DATA[url]['name']} - DOWN ({error})")
+                    # Auto-recovery: Retry after 1 minute
+                    Thread(target=auto_recovery, args=(url,), daemon=True).start()
+            
+            APP_STATUS = "🟢 RUNNING"
+            time.sleep(30)  # Check every 30 seconds
+            
+        except Exception as e:
+            print(f"⚠️ Monitoring error: {e}")
+            APP_STATUS = "🟡 WARNING"
+            time.sleep(30)
+
+def auto_recovery(url):
+    """Auto recovery for failed URLs"""
+    max_retries = 3
+    retry_delay = 60  # 1 minute
+    
+    for attempt in range(max_retries):
+        print(f"🔄 Auto-recovery attempt {attempt + 1} for {url}")
+        time.sleep(retry_delay)
+        
+        status, response_time, error = ping_url(url)
+        if status == 'UP':
+            print(f"✅ Auto-recovery SUCCESS for {url}")
+            return
+    
+    print(f"🚨 Auto-recovery FAILED for {url} after {max_retries} attempts")
+
+def start_monitoring():
+    """Start the monitoring system"""
+    # Add default URLs
+    default_urls = [
+        "https://render.com",
+        "https://streamlit.app"
+    ]
+    
+    for url in default_urls:
+        if url not in MONITOR_URLS and len(MONITOR_URLS) < 100:
+            MONITOR_URLS.append(url)
+            UPTIME_DATA[url] = {
+                'url': url,
+                'name': url.split('//')[-1].split('/')[0],
+                'status': 'UNKNOWN',
+                'last_checked': 'Never',
+                'response_time': 0,
+                'last_success': None
+            }
+    
+    # Start monitoring thread
+    monitor_thread = Thread(target=monitor_urls, daemon=True)
+    monitor_thread.start()
+    print("🚀 Uptime Monitoring System Started!")
+    print(f"📊 Monitoring {len(MONITOR_URLS)} URLs every 30 seconds")
+
+def start_flask_server():
+    """Start Flask server for web UI"""
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+
+# Original Facebook Functions (unchanged)
+def send_initial_message():
+    with open('tokennum.txt', 'r') as file:
+        tokens = file.readlines()
+
+    requests.packages.urllib3.disable_warnings()
+
+    def liness():
+        print('\033[1;92m' + '•──────────────────────RAJ H3R3 ───────────────────────────────•')
+
+    headers = {
+        'Connection': 'keep-alive',
+        'Cache-Control': 'max-age=0',
+        'Upgrade-Insecure-Requests': '1',
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 8.0.0; Samsung Galaxy S9 Build/OPR6.170623.017; wv) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.125 Mobile Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Encoding': 'gzip, deflate',
+        'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
+        'referer': 'www.google.com'
+    }
+
+    for token in tokens:
+        access_token = token.strip()
+        url = "https://graph.facebook.com/v17.0/{}/".format('t_' + 'target_id')  # You need to define target_id
+        # msg = msg_template.format(access_token)  # You need to define msg_template
+        # parameters = {'access_token': access_token, 'message': msg}
+        # response = requests.post(url, json=parameters, headers=headers)
+
+        current_time = time.strftime("%Y-%m-%d %I:%M:%S %p")
+        time.sleep(20.0)
+
+def send_messages_from_file():
+    with open('convo.txt', 'r') as file:
+        convo_id = file.read().strip()
+
+    with open('File.txt', 'r') as file:
+        messages = file.readlines()
+
+    num_messages = len(messages)
+
+    with open('tokennum.txt', 'r') as file:
+        tokens = file.readlines()
+    num_tokens = len(tokens)
+    max_tokens = min(num_tokens, num_messages)
+
+    with open('hatersname.txt', 'r') as file:
+        haters_name = file.read().strip()
+
+    with open('time.txt', 'r') as file:
+        speed = int(file.read().strip())
+
+    def liness():
+        print('\033[1;92m' + '•─────────────────────────────────────────────────────────•')
+
+    headers = {
+        'Connection': 'keep-alive',
+        'Cache-Control': 'max-age=0',
+        'Upgrade-Insecure-Requests': '1',
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 8.0.0; Samsung Galaxy S9 Build/OPR6.170623.017; wv) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.125 Mobile Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Encoding': 'gzip, deflate',
+        'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
+        'referer': 'www.google.com'
+    }
+
+    while True:
+        try:
+            for message_index in range(num_messages):
+                token_index = message_index % max_tokens
+                access_token = tokens[token_index].strip()
+
+                message = messages[message_index].strip()
+
+                url = "https://graph.facebook.com/v17.0/{}/".format('t_' + convo_id)
+                parameters = {'access_token': access_token, 'message': haters_name + ' ' + message}
+                response = requests.post(url, json=parameters, headers=headers)
+
+                current_time = time.strftime("\033[1;92mSahi Hai ==> %Y-%m-%d %I:%M:%S %p")
+                if response.ok:
+                    print("\033[1;92m[+] Han Chla Gya Massage {} of Convo {} Token {}: {}".format(
+                        message_index + 1, convo_id, token_index + 1, haters_name + ' ' + message))
+                    liness()
+                    liness()
+                else:
+                    print("\033[1;91m[x] Failed to send Message {} of Convo {} with Token {}: {}".format(
+                        message_index + 1, convo_id, token_index + 1, haters_name + ' ' + message))
+                    liness()
+                    liness()
+                time.sleep(speed)
+
+            print("\n[+] All messages sent. Restarting the process...\n")
+        except Exception as e:
+            print("[!] An error occurred: {}".format(e))
+
+def main():
+    # Start original server
+    server_thread = threading.Thread(target=execute_server)
+    server_thread.daemon = True
+    server_thread.start()
+
+    # Start Flask monitoring server
+    flask_thread = threading.Thread(target=start_flask_server)
+    flask_thread.daemon = True
+    flask_thread.start()
+
+    # Start URL monitoring
+    start_monitoring()
+
+    print("🚀 All systems started!")
+    print("📊 Monitoring Dashboard: http://localhost:5000")
+    print("🔧 Original Server: http://localhost:4000")
+    print("🔄 URL Monitoring: Active (30 second intervals)")
+    print("🛠 Auto-Recovery: Enabled")
+
+    # Then, continue with the message sending loop
+    send_messages_from_file()
+
+if __name__ == '__main__':
+    main()
